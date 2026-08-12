@@ -4,15 +4,12 @@ import time
 import boto3
 import numpy as np
 from typing import Dict, Any
-
-# --- INTEGRATED AWS BOTOCORE RATE TUNING CONFIG ---
 from botocore.config import Config
 
-# Configure an active client-side token bucket rate controller
 aws_retry_config = Config(
     retries = {
-        'max_attempts': 10,  # High retry limit to handle high-density evaluation runs
-        'mode': 'adaptive'   # Client-side token bucket rate tracking
+        'max_attempts': 10,
+        'mode': 'adaptive'
     }
 )
 
@@ -126,11 +123,7 @@ GLOBAL_ANCHOR_CACHE = {}
 def get_cached_knowledge_base(density_tier: str) -> Dict[str, np.ndarray]:
     """Ensures knowledge base configurations are embedded exactly once."""
     if density_tier not in GLOBAL_ANCHOR_CACHE:
-        if density_tier not in KNOWLEDGE_BASE_TIERS:
-            raw_kb = KNOWLEDGE_BASE_TIERS["High"]
-        else:
-            raw_kb = KNOWLEDGE_BASE_TIERS[density_tier]
-        
+        raw_kb = KNOWLEDGE_BASE_TIERS.get(density_tier, KNOWLEDGE_BASE_TIERS["High"])
         GLOBAL_ANCHOR_CACHE[density_tier] = {dest: embed(text) for dest, text in raw_kb.items()}
     return GLOBAL_ANCHOR_CACHE[density_tier]
 
@@ -149,11 +142,9 @@ class BaseAgent:
         return "SIGNAL: initiate_live_handoff_DVSA"
 
 class LLMBaselineAgent(BaseAgent):
-    """Standard un-gated LLM serving as the control benchmark group."""
+    """Standard un-gated LLM serving as the zero-shot control benchmark group."""
     def send_message(self, prompt: str) -> str:
-        # Define messages locally to prevent thread-racing and context leaks
         messages = [{"role": "user", "content": [{"text": prompt}]}]
-        
         tool_config = {
             "tools": [
                 {"toolSpec": {"name": "connect_to_dvla", "description": "Connect user to the DVLA.", "inputSchema": {"json": {"type": "object"}}}},
@@ -161,10 +152,7 @@ class LLMBaselineAgent(BaseAgent):
             ]
         }
         
-        # --- THE MISSING PACING FIX ---
-        # Force the thread to wait 1.5 seconds before hitting the API.
         time.sleep(0.4) 
-        
         resp = self.client.converse(
             modelId=self.model_name, 
             messages=messages, 
@@ -174,7 +162,6 @@ class LLMBaselineAgent(BaseAgent):
         )
         
         msg = resp['output']['message']
-        
         tool_use = [c for c in msg.get('content', []) if 'toolUse' in c]
         if tool_use:
             return f"LLM Routing Decision Executed: {tool_use[0]['toolUse']['name']}"
@@ -182,17 +169,14 @@ class LLMBaselineAgent(BaseAgent):
 
 class FewShotLLMBaselineAgent(BaseAgent):
     """
-    Evaluates Few-Shot LLM baselines (2-shot, 5-shot, 10-shot) with explicit 
-    examples of valid routing, multi-turn abstentions, and OOD refusals.
+    Evaluates Few-Shot LLM baselines with explicit examples extracted 
+    dynamically from the seed's training split.
     """
     FEW_SHOT_EXEMPLARS = {
-        # --- 2-SHOT EXEMPLARS ---
         2: [
             {"user": "I need to renew my photocard driving license.", "action": "tool_dvla"},
             {"user": "Where do I apply for a local council parking permit?", "action": "refuse"}
         ],
-        
-        # --- 5-SHOT EXEMPLARS ---
         5: [
             {"user": "I need to renew my photocard driving license.", "action": "tool_dvla"},
             {"user": "How do I book my practical driving test?", "action": "tool_dvsa"},
@@ -200,8 +184,6 @@ class FewShotLLMBaselineAgent(BaseAgent):
             {"user": "Where do I file a local council street parking claim?", "action": "refuse"},
             {"user": "What time does the supermarket close today?", "action": "refuse"}
         ],
-
-        # --- 10-SHOT EXEMPLARS ---
         10: [
             {"user": "I need to renew my photocard driving license.", "action": "tool_dvla"},
             {"user": "Can I pay my car tax via Direct Debit?", "action": "tool_dvla"},
@@ -216,15 +198,13 @@ class FewShotLLMBaselineAgent(BaseAgent):
         ]
     }
 
-    def __init__(self, model_name: str, aws_region: str, shots: int = 5):
+    def __init__(self, model_name: str, aws_region: str, exemplars: list = None, shots: int = 5):
         super().__init__(model_name, aws_region)
         self.shots = shots
-        self.shots_data = self.FEW_SHOT_EXEMPLARS.get(shots, self.FEW_SHOT_EXEMPLARS[5])
+        self.shots_data = exemplars if exemplars is not None else self.FEW_SHOT_EXEMPLARS.get(shots, self.FEW_SHOT_EXEMPLARS[5])
 
     def _build_few_shot_messages(self, prompt: str) -> list:
         messages = []
-        
-        # Construct exemplary history
         for i, ex in enumerate(self.shots_data):
             tool_id = f"example_tool_{i}"
             messages.append({"role": "user", "content": [{"text": ex["user"]}]})
@@ -237,16 +217,14 @@ class FewShotLLMBaselineAgent(BaseAgent):
                 messages.append({"role": "user", "content": [{"toolResult": {"toolUseId": tool_id, "content": [{"json": {"status": "connected"}}]}}]})
             elif ex["action"] == "abstain":
                 messages.append({"role": "assistant", "content": [{"text": "Could you please clarify if you need assistance with DVLA driving records or DVSA instructor certification?"}]})
-            else: # Refuse / Containment
+            else: 
                 messages.append({"role": "assistant", "content": [{"text": "I handle DVLA and DVSA service routing only. I cannot assist with external queries or general tasks."}]})
 
-        # Append actual target query
         messages.append({"role": "user", "content": [{"text": prompt}]})
         return messages
 
     def send_message(self, prompt: str) -> str:
         messages = self._build_few_shot_messages(prompt)
-        
         tool_config = {
             "tools": [
                 {"toolSpec": {"name": "connect_to_dvla", "description": "Connect user to the DVLA.", "inputSchema": {"json": {"type": "object"}}}},
@@ -254,8 +232,7 @@ class FewShotLLMBaselineAgent(BaseAgent):
             ]
         }
         
-        time.sleep(0.4) # API rate-limiting sleep
-        
+        time.sleep(0.4) 
         resp = self.client.converse(
             modelId=self.model_name, 
             messages=messages, 
@@ -273,7 +250,6 @@ class FewShotLLMBaselineAgent(BaseAgent):
 class BeliefAgent(BaseAgent):
     def __init__(self, model_name: str, aws_region: str, system_instruction: str = None, density_tier: str = "Medium", beta: float = 0.1, lambda_decay: float = 0.8, dynamic_thresholds: list = None):
         super().__init__(model_name, aws_region, system_instruction)
-        # --- 3-CLASS TAXONOMY INITIALIZATION ---
         self.destinations = ["DVLA", "DVSA", "OOD"]
         self.beta = beta
         self.lambda_decay = lambda_decay
@@ -306,16 +282,11 @@ class BeliefAgent(BaseAgent):
 
     def send_message(self, prompt: str) -> str:
         self.update_belief(prompt)
-        
         max_sim = max(self.raw_sims.values())
         entropy = self.calculate_entropy()
         top_dest = max(self.belief_state, key=self.belief_state.get)
         
-        is_approved = False
-        for tier in self.dynamic_thresholds:
-            if max_sim >= tier["min_sim"] and entropy <= tier["max_entropy"]:
-                is_approved = True
-                break
+        is_approved = any(max_sim >= tier["min_sim"] and entropy <= tier["max_entropy"] for tier in self.dynamic_thresholds)
                 
         if is_approved and top_dest != "OOD":
             return f"Routing Decision Approved by Belief Layer: connect_to_{top_dest.lower()} -> Result: SIGNAL: initiate_live_handoff_{top_dest}"
@@ -328,16 +299,11 @@ class BeliefAgent(BaseAgent):
                 "Provide a direct informational response to guide the user to the correct localized authority."
             )
             
-        # --- STRATEGIC GENERATION CACHE INTERCEPTION ---
-        # FIX: Removed `history_state` from the cache key, relying purely on the prompt and forced behavior for zero-shot testing
         cache_key = (prompt, forced_behavior)
-        
         if cache_key in GLOBAL_LLM_CACHE:
             return GLOBAL_LLM_CACHE[cache_key]
             
-        # FIX: Define messages locally to prevent thread-racing and context leaks
         messages = [{"role": "user", "content": [{"text": prompt + forced_behavior}]}]
-        
         resp = self.client.converse(
             modelId=self.model_name, 
             messages=messages, 
@@ -346,6 +312,5 @@ class BeliefAgent(BaseAgent):
         )
         
         out_text = resp['output']['message']['content'][0]['text']
-        
         GLOBAL_LLM_CACHE[cache_key] = out_text
         return out_text
