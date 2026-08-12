@@ -134,9 +134,8 @@ class UnifiedCorpusGenerator:
         self.bedrock_client = boto3.client('bedrock-runtime', region_name=region_name, config=aws_retry_config)
         self.models = [
             "eu.anthropic.claude-haiku-4-5-20251001-v1:0", 
-            "anthropic.claude-sonnet-4-6",            
             "amazon.nova-pro-v1:0"           
-        ]
+                      ]
         self.personas = [
             "a stressed citizen typing hastily on a mobile phone with minor typos.",
             "an elderly person who is very polite and slightly confused.",
@@ -216,7 +215,6 @@ class UnifiedCorpusGenerator:
                 paraphrased_corpus.append(future.result())
         return paraphrased_corpus
 
-
 def main():
     os.makedirs("data", exist_ok=True)
     random.seed(42)  
@@ -225,12 +223,23 @@ def main():
     print("\n" + "="*60)
     print("STEP 1: GENERATING PHASE I (CLEAN BASELINE)")
     print("="*60)
-    TARGET_PER_CLASS = 2500
     
-    dvla_data = generator.get_clean_pool(OPENINGS, DVLA_INTENTS, DVLA_CONTEXTS, "DVLA", "traj_dvla", TARGET_PER_CLASS)
-    dvsa_data = generator.get_clean_pool(OPENINGS, DVSA_INTENTS, DVSA_CONTEXTS, "DVSA", "traj_dvsa", TARGET_PER_CLASS)
-    near_ood_data = generator.get_clean_pool(OPENINGS, NEAR_OOD_ACTIONS, NEAR_OOD_CONTEXTS, "OOD", "traj_ood_near", TARGET_PER_CLASS, use_traps=True, traps=NEAR_OOD_TRAPS)
-    far_ood_data = generator.get_clean_pool(OPENINGS, FAR_OOD_INTENTS, FAR_OOD_CONTEXTS, "OOD", "traj_ood_far", TARGET_PER_CLASS)
+    # 625 samples per class * 4 classes = 2,500 total trajectories
+    TARGET_PER_CLASS = 625
+    
+    dvla_data = generator.get_clean_pool(
+        OPENINGS, DVLA_INTENTS, DVLA_CONTEXTS, "DVLA", "traj_dvla", TARGET_PER_CLASS
+    )
+    dvsa_data = generator.get_clean_pool(
+        OPENINGS, DVSA_INTENTS, DVSA_CONTEXTS, "DVSA", "traj_dvsa", TARGET_PER_CLASS
+    )
+    near_ood_data = generator.get_clean_pool(
+        OPENINGS, NEAR_OOD_ACTIONS, NEAR_OOD_CONTEXTS, "OOD", "traj_ood_near", 
+        TARGET_PER_CLASS, use_traps=True, traps=NEAR_OOD_TRAPS
+    )
+    far_ood_data = generator.get_clean_pool(
+        OPENINGS, FAR_OOD_INTENTS, FAR_OOD_CONTEXTS, "OOD", "traj_ood_far", TARGET_PER_CLASS
+    )
     
     phase1_dataset = dvla_data + dvsa_data + near_ood_data + far_ood_data
     random.shuffle(phase1_dataset)
@@ -238,7 +247,7 @@ def main():
     p1_path = os.path.join("data", "synthetic_corpus_phase1.json")
     with open(p1_path, "w", encoding="utf-8") as f:
         json.dump(phase1_dataset, f, indent=4)
-    print(f"Success: Saved 10,000 clean trajectories to '{p1_path}'\n")
+    print(f"Success: Saved {len(phase1_dataset)} clean trajectories to '{p1_path}'\n")
 
     print("="*60)
     print("STEP 2: GENERATING PHASE II (ADVERSARIAL DEGRADATION)")
@@ -249,7 +258,7 @@ def main():
     p2_path = os.path.join("data", "synthetic_corpus_phase2.json")
     with open(p2_path, "w", encoding="utf-8") as f:
         json.dump(phase2_dataset, f, indent=4)
-    print(f"\nSuccess: Saved 10,000 paraphrased trajectories to '{p2_path}'")
+    print(f"\nSuccess: Saved {len(phase2_dataset)} paraphrased trajectories to '{p2_path}'")
     print("Unified Generation Complete. You may now run main.py.")
 
 if __name__ == "__main__":
