@@ -3,7 +3,7 @@ import torch
 from visualizer import NSBRVisualizer
 from experiment_pipeline import ExperimentPipeline
 
-# 1. PHASE-SPECIFIC HYPERPARAMETER CONFIGURATIONS (CALIBRATED INFERENCE GATES)
+# PHASE-SPECIFIC HYPERPARAMETER CONFIGURATIONS (CALIBRATED INFERENCE GATES)
 
 PHASE_I_VARIANTS = {
     # REGIME 1: ULTRA-SAFETY & ZERO-LEAKAGE (High Margin, Controlled Gates)
@@ -19,7 +19,7 @@ PHASE_I_VARIANTS = {
     },
 
     # REGIME 2: OPTIMAL PARETO & BALANCED (The "Knee" Region)
-    "BPTT_Sim_Strict": {  # Primary Recommended Configuration (~90% DRR @ ~97% QPR)
+    "BPTT_Sim_Strict": {  
         "w_safe": 3.0, "w_yield": 3.0, "w_temp": 1.0, "w_sim": 6.0, 
         "h_yield": 0.60, "h_temp": 0.70, "min_sim": 0.30, 
         "eval_gate": 1.40, "eval_sim": 0.15, "beta": 0.05
@@ -113,7 +113,7 @@ def main():
         print("Please run your data generators (data_gen.py and data_generator.py) before executing main.py.")
         return
 
-    # --- PHASE I: CLEAN BASELINE ---
+    # PHASE I: CLEAN BASELINE
     print("\n" + "="*90)
     print("STARTING PHASE I: CLEAN BASELINE EVALUATION")
     print("="*90)
@@ -130,7 +130,7 @@ def main():
     )    
     NSBRVisualizer.plot_triple_results(p1_train, p1_test, p1_full, "Phase I (Clean Baseline)")
 
-    # --- PHASE II: ADVERSARIAL CORPUS ---
+    # PHASE II: ADVERSARIAL CORPUS
     print("\n" + "="*90)
     print("STARTING PHASE II: ADVERSARIAL CORPUS DEGRADATION & RECOVERY")
     print("="*90)
