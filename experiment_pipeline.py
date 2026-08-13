@@ -353,13 +353,12 @@ class ExperimentPipeline:
         print(f"{'ARCHITECTURE / VARIANT':<30} | {'DPR (Safety)':<18} | {'DRR (Yield)':<18} | {'SAR (Defense)':<18} | {'FAR (Friction)':<18}")
         print("-" * 140)
         
-        metrics_list = ["DPR", "DRR", "SAR", "FAR", "TPP", "TP", "FP", "TN", "FN"]
         
         for key in agg_test:
             # Calculate means
-            final_train[key] = {m: float(np.mean(agg_train[key][m])) for m in metrics_list}
-            final_test[key]  = {m: float(np.mean(agg_test[key][m])) for m in metrics_list}
-            final_full[key]  = {m: float(np.mean(agg_full[key][m])) for m in metrics_list}
+            final_train[key] = {m: float(np.mean(agg_train[key][m])) for m in self.METRICS_LIST}
+            final_test[key]  = {m: float(np.mean(agg_test[key][m])) for m in self.METRICS_LIST}
+            final_full[key]  = {m: float(np.mean(agg_full[key][m])) for m in self.METRICS_LIST}
             
             # Calculate standard deviations for display
             te_dpr_m, te_dpr_s = final_test[key]["DPR"], float(np.std(agg_test[key]["DPR"]))
