@@ -286,7 +286,7 @@ class BeliefAgent(BaseAgent):
         entropy = self.calculate_entropy()
         top_dest = max(self.belief_state, key=self.belief_state.get)
         
-        is_approved = any(max_sim >= tier["min_sim"] and entropy <= tier["max_entropy"] for tier in self.dynamic_thresholds)
+        is_approved = any(max_sim >= tier["min_sim"] and entropy <= tier["max_entropy"] for tier in (self.dynamic_thresholds or []) )
                 
         if is_approved and top_dest != "OOD":
             return f"Routing Decision Approved by Belief Layer: connect_to_{top_dest.lower()} -> Result: SIGNAL: initiate_live_handoff_{top_dest}"
