@@ -1,56 +1,107 @@
 import os
 import json
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 class NSBRVisualizer:
     """
-    Handles all Matplotlib and Pandas-based charting for the NSBR framework,
-    including the triple-pane SLA results and the stacked tier analysis.
+    Handles Matplotlib and Pandas-based charting for the NSBR framework's 
+    stacked tier analysis.
     """
 
     @staticmethod
-    def plot_triple_results(train_results, test_results, full_results, phase_name):
-        """Generates Tri-Pane Presentation Chart (Train/Test/Full) for QPR and DRR SLAs."""
-        print(f"\n--- Generating Tri-Pane Presentation Chart for {phase_name} ---")
-        labels = list(train_results.keys())
-        x = np.arange(len(labels))
-        width = 0.35
+    def plot_triple_results(train_res, test_res, full_res, phase_title):
+        """
+        Generates a comparative bar chart of key metrics (DPR, DRR, SAR, FAR) 
+        across Train, Test, and Full sets for each evaluated architecture.
+        """
+        print(f"Generating Triple Results Plot for: {phase_title}...")
+        
+        # Define the core metrics we want to plot
+        metrics_to_plot = ["DPR", "DRR", "SAR", "FAR"]
+        
+        # Flatten the dictionaries into a single DataFrame
+        records = []
+        for split_name, data_dict in [("Train", train_res), ("Test", test_res), ("Full", full_res)]:
+            for method, metrics in data_dict.items():
+                # Clean up method names to fit nicely on the x-axis
+                clean_method = method.replace('\n', ' ')
+                
+                record = {"Split": split_name, "Method": clean_method}
+                for m in metrics_to_plot:
+                    record[m] = metrics.get(m, 0.0)
+                records.append(record)
+                
+        df = pd.DataFrame(records)
+        
+        if df.empty:
+            print("Warning: No data provided to plot_triple_results.")
+            return
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(24, 18), sharex=True)
+        # Sort the methods by our established architecture groups
+        df['sort_key'] = df['Method'].apply(lambda x: NSBRVisualizer._get_architecture_group(x)[0])
+        df = df.sort_values(by=['sort_key', 'Method'])
+        methods = df['Method'].unique()
 
-        def plot_pane(ax, data_dict, title):
-            qpr_scores = [data_dict[l]["QPR"] for l in labels]
-            drr_scores = [data_dict[l]["DRR"] for l in labels]
+        # Set up a 2x2 grid for the 4 metrics
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        axes = axes.flatten()
+        fig.suptitle(f'{phase_title}: Core Metrics Across Data Splits', fontsize=18, fontweight='bold', y=1.02)
+
+        # Standardized colors for Train, Test, Full
+        split_colors = {"Train": "#aec7e8", "Test": "#1f77b4", "Full": "#2ca02c"}
+
+        for i, metric in enumerate(metrics_to_plot):
+            ax = axes[i]
             
-            rects1 = ax.bar(x - width/2, qpr_scores, width, label='QPR (Safety)', color='#2ecc71', edgecolor='black')
-            rects2 = ax.bar(x + width/2, drr_scores, width, label='DRR (Yield)', color='#3498db', edgecolor='black')
+            # Pivot data so Methods are on the X-axis and Splits are grouped bars
+            pivot_df = df.pivot(index='Method', columns='Split', values=metric)
             
-            ax.set_ylabel('SLA (%)', fontsize=12, fontweight='bold')
-            ax.set_title(title, fontsize=14, fontweight='bold', pad=12)
-            ax.set_ylim(0, 115)
-            ax.legend(loc='upper right', framealpha=0.9, fontsize=10)
-            ax.axhline(100, color='#e74c3c', linestyle='--', linewidth=1.5, alpha=0.7)
+            # Reorder rows to match our architecture sorting
+            pivot_df = pivot_df.reindex(methods)
+            
+            # Reorder columns to always be Train -> Test -> Full
+            ordered_splits = [s for s in ["Train", "Test", "Full"] if s in pivot_df.columns]
+            pivot_df = pivot_df[ordered_splits]
+            
+            # Plot
+            pivot_df.plot(
+                kind='bar', 
+                color=[split_colors[s] for s in ordered_splits], 
+                ax=ax, 
+                width=0.7, 
+                edgecolor='black', 
+                linewidth=0.5
+            )
+            
+            ax.set_title(f"{metric} (%)", fontsize=14, fontweight='bold', pad=10)
+            ax.set_xlabel('')
+            ax.set_ylabel('Percentage (%)')
+            ax.set_ylim(0, 105)
+            ax.set_xticklabels(pivot_df.index, rotation=45, ha='right', fontsize=10)
+            
+            # Add gridlines for easier reading
+            ax.yaxis.grid(True, linestyle='--', alpha=0.7)
+            ax.set_axisbelow(True)
 
-            for rect in rects1 + rects2:
-                height = rect.get_height()
-                ax.annotate(f'{height:.1f}%', xy=(rect.get_x() + rect.get_width() / 2, height),
-                            xytext=(0, 4), textcoords="offset points",
-                            ha='center', va='bottom', fontsize=8, fontweight='bold')
+            # Only keep the legend on the first subplot to reduce clutter
+            if i == 0:
+                ax.legend(title='Dataset Split', fontsize=10)
+            else:
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
 
-        plot_pane(ax1, train_results, f'{phase_name} - TRAIN SET (80%)')
-        plot_pane(ax2, test_results,  f'{phase_name} - TEST SET (20%)')
-        plot_pane(ax3, full_results,  f'{phase_name} - FULL CORPUS (100%)')
-
-        ax3.set_xticks(x)
-        ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=10, fontweight='bold')
-
-        fig.tight_layout()
-        chart_path = os.path.join("results", f'{phase_name.lower().replace(" ", "_")}_results_chart.png')
-        plt.savefig(chart_path, dpi=300)
-        print(f"Chart successfully saved to: '{chart_path}'")
+        plt.tight_layout()
+        
+        # Save the figure
+        os.makedirs("results", exist_ok=True)
+        filename_safe_title = phase_title.replace(' ', '_').replace('(', '').replace(')', '').lower()
+        output_filename = os.path.join("results", f"{filename_safe_title}_triple_results.png")
+        
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+        print(f"Successfully saved triple results plot to: {output_filename}")
         plt.close()
+
 
     @staticmethod
     def _categorize_tier(traj_id, tier_label):
@@ -75,6 +126,23 @@ class NSBRVisualizer:
         elif outcome_code in ['SA', 'TN']:
             return 'Abstained / True Negative'
         return 'Other'
+        
+    @staticmethod
+    def _get_architecture_group(method_name):
+        """
+        Assigns an integer sort key and group name based on the architecture type 
+        to ensure they are clustered together on the x-axis.
+        """
+        name_lower = str(method_name).lower()
+        if 'sonnet' in name_lower or 'llm' in name_lower or 'shot' in name_lower:
+            return 1, 'Generative LLM'
+        elif 'logistic' in name_lower or 'mlp' in name_lower:
+            return 2, 'Classical ML'
+        elif 'handcrafted' in name_lower or 'manual' in name_lower or 'heuristic' in name_lower:
+            return 3, 'Heuristic'
+        elif 'bptt' in name_lower or 'nsbr' in name_lower:
+            return 4, 'BPTT'
+        return 5, 'Other'
 
     @staticmethod
     def _process_tier_data(df):
@@ -83,7 +151,13 @@ class NSBRVisualizer:
             return df
 
         # Apply mapping logic for granular sub-tiers
-        df['Granular_Tier'] = df.apply(lambda row: NSBRVisualizer._categorize_tier(row['trajectory_id'], row['tier']), axis=1)
+        df['Granular_Tier'] = df.apply(
+            lambda row: NSBRVisualizer._categorize_tier(
+                row['trajectory_id'], 
+                row['tier'] if 'tier' in df.columns else row.get('operational_tier', 'Unknown')
+            ), 
+            axis=1
+        )
         df['Mapped_Outcome'] = df['outcome'].apply(NSBRVisualizer._map_outcome)
 
         # Group and calculate percentages
@@ -97,7 +171,7 @@ class NSBRVisualizer:
 
     @staticmethod
     def plot_tier_analysis(file_path, phase_name):
-        """Generates a stacked bar chart for a specific phase from a JSON trace file."""
+        """Generates a 2x2 stacked bar chart for a specific phase from a JSON trace file."""
         if not os.path.exists(file_path):
             print(f"Warning: '{file_path}' not found. Cannot generate tier analysis.")
             return
@@ -107,6 +181,8 @@ class NSBRVisualizer:
         
         df = pd.DataFrame(data)
         df['Phase'] = phase_name
+        # Filter out pathological control baselines prior to generating bar charts
+        df = df[~df['method'].str.contains('Unconstrained', case=False, na=False)]
         
         # Format the naming convention to match the LaTeX manuscript charts
         df['method'] = df['method'].str.replace('Manual', 'Handcrafted', regex=False)
@@ -124,8 +200,12 @@ class NSBRVisualizer:
             'Misrouted': '#d62728'
         }
 
-        fig, axes = plt.subplots(1, 4, figsize=(20, 8), sharey=True)
-        fig.suptitle(f'{phase_name}: Routing Outcomes by Difficulty Tier across Architectures', fontsize=18, fontweight='bold', y=1.05)
+        # Change to 2x2 Grid, increase height for better spacing
+        fig, axes = plt.subplots(2, 2, figsize=(22, 16), sharey=True)
+        axes = axes.flatten() # Flatten 2x2 array for easy iteration
+        
+        fig.suptitle(f'{phase_name}: Routing Outcomes by Difficulty Tier across Architectures', 
+                     fontsize=20, fontweight='bold', y=1.02)
 
         for i, tier in enumerate(tier_order):
             ax = axes[i]
@@ -142,23 +222,78 @@ class NSBRVisualizer:
                 if outcome not in pivot_df.columns:
                     pivot_df[outcome] = 0.0
                     
-            pivot_df = pivot_df[list(colors.keys())]
+            # Grouping and Sorting Logic (with spacers)
 
-            pivot_df.plot(kind='bar', stacked=True, color=[colors[col] for col in pivot_df.columns], ax=ax, width=0.8)
-            
-            ax.set_title(tier, fontsize=14, fontweight='bold')
-            ax.set_xlabel('')
-            ax.set_ylabel('Percentage of Queries (%)' if i == 0 else '')
-            ax.set_ylim(0, 100)
-            ax.set_xticklabels(pivot_df.index, rotation=65, ha='right', rotation_mode='anchor', fontsize=10)
-            
-            if i == 3:
-                ax.legend(title='Outcome', bbox_to_anchor=(1.05, 1), loc='upper left')
+            # Assign sort keys
+            pivot_df['sort_key'] = [NSBRVisualizer._get_architecture_group(x)[0] for x in pivot_df.index]
+
+            if tier in ['Direct ID (Easy)', 'Ambiguous ID (Medium)']:
+                # For ID queries, sort by highest Yield (Green)
+                pivot_df = pivot_df.sort_values(by=['sort_key', 'Successfully Routed'], ascending=[True, False])
             else:
-                ax.get_legend().remove()
+                # For OOD queries, sort by highest Safety/Abstention (Blue)
+                pivot_df = pivot_df.sort_values(by=['sort_key', 'Abstained / True Negative'], ascending=[True, False])
+            
+            # Reconstruct index with empty spacer rows between groups
+            new_records = []
+            new_index = []
+            current_group = None
+            spacer_idx = 0
+            
+            for idx, row in pivot_df.iterrows():
+                group_key = row['sort_key']
+                if current_group is not None and group_key != current_group:
+                    # Inject a visual spacer
+                    spacer_name = f"__spacer_{spacer_idx}__"
+                    new_index.append(spacer_name)
+                    new_records.append({c: 0.0 for c in colors.keys()})
+                    spacer_idx += 1
+                
+                new_index.append(idx)
+                new_records.append({c: row[c] for c in colors.keys()})
+                current_group = group_key
+                
+            spaced_df = pd.DataFrame(new_records, index=new_index)
+            spaced_df = spaced_df[list(colors.keys())] # Drop sort_key
 
-        plt.tight_layout(w_pad=2.0)
-        output_filename = os.path.join("results", f"{phase_name.replace(' ', '_')}_tier_analysis.png")
+            # Plot the spaced dataframe
+            spaced_df.plot(kind='bar', stacked=True, color=[colors[col] for col in spaced_df.columns], ax=ax, width=0.85)
+            
+            # Formatting
+            ax.set_title(tier, fontsize=16, fontweight='bold', pad=15)
+            ax.set_xlabel('')
+            
+            if i % 2 == 0:
+                ax.set_ylabel('Percentage of Queries (%)', fontsize=12)
+            
+            ax.set_ylim(0, 105)
+            
+            # Format x-ticks (hide spacer names)
+            cleaned_labels = [label if not label.startswith("__spacer") else "" for label in spaced_df.index]
+            ax.set_xticklabels(cleaned_labels, rotation=45, ha='right', rotation_mode='anchor', fontsize=11)
+            
+            # Manage Legends
+            if i == 1: # Top right plot
+                ax.legend(title='Outcome', bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=12, title_fontsize=14)
+            else:
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
+
+        plt.tight_layout(w_pad=3.0, h_pad=4.0)
+        
+        # Ensure the results directory exists
+        os.makedirs("results", exist_ok=True)
+        output_filename = os.path.join("results", f"{phase_name.replace(' ', '_')}_tier_analysis_2x2.png")
+        
         plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-        print(f"Successfully generated and saved tier analysis: {output_filename}")
+        print(f"Successfully generated and saved 2x2 tier analysis: {output_filename}")
         plt.close()
+
+if __name__ == "__main__":
+    # Define the paths to your JSON trace files
+    phase1_traces = "results/phase1_grouped_test_traces_master.json"
+    phase2_traces = "results/phase2_grouped_test_traces_master.json"
+    
+    # Generate the tier plots
+    NSBRVisualizer.plot_tier_analysis(phase1_traces, "Phase I")
+    NSBRVisualizer.plot_tier_analysis(phase2_traces, "Phase II")
